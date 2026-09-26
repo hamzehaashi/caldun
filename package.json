@@ -1,0 +1,15 @@
+{
+  "name": "caldun",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CALDUN investment research workspace MVP",
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev",
+    "check": "node --check public/app.js"
+  },
+  "devDependencies": {
+    "@netlify/functions": "latest",
+    "netlify-cli": "latest"
+  }
+}
