@@ -1,0 +1,38 @@
+name: Preview SEC Smoke
+
+on:
+  push:
+    branches:
+      - diagnostic-sec-preview
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Allow Netlify preview to publish
+        run: sleep 45
+
+      - name: Verify preview homepage
+        run: |
+          curl --fail --silent --show-error --max-time 20 https://deploy-preview-4--caldun.netlify.app/ > /tmp/home.html
+          grep -q "Understand the business" /tmp/home.html
+
+      - name: Verify real tickers
+        shell: bash
+        run: |
+          set -euo pipefail
+          for TICKER in AAPL MSFT WMT; do
+            STATUS=$(curl --silent --show-error --max-time 30 \
+              --output "/tmp/${TICKER}.json" \
+              --write-out "%{http_code}" \
+              "https://deploy-preview-4--caldun.netlify.app/api/company?ticker=${TICKER}" || true)
+            echo "${TICKER} HTTP ${STATUS}"
+            cat "/tmp/${TICKER}.json" || true
+            echo
+            test "$STATUS" = "200"
+            TICKER="$TICKER" node -e "const fs=require('fs'); const t=process.env.TICKER; const d=JSON.parse(fs.readFileSync('/tmp/'+t+'.json','utf8')); if(d.ticker!==t) throw new Error('ticker mismatch'); if(!Array.isArray(d.financials)||d.financials.filter(r=>Number.isFinite(r.revenue)).length<3) throw new Error('insufficient history');"
+          done
