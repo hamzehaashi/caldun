@@ -9,7 +9,7 @@ export type AssumptionKey =
   | 'terminal';
 
 export type Assumptions = Record<AssumptionKey, number>;
-export type AssumptionSource = 'derived' | 'default' | 'analyst';
+export type AssumptionSource = 'derived' | 'derived-adjusted' | 'default' | 'analyst';
 export type AssumptionSources = Record<AssumptionKey, AssumptionSource>;
 
 export type SecUnit = {
