@@ -11,14 +11,23 @@ The MVP uses SEC Company Facts for filing-derived fundamentals. It intentionally
 ## Local development
 
 ```bash
+cp .env.example .env
+# Edit SEC_USER_AGENT in .env with a descriptive app/contact identity.
 npm install
 npm run dev
 ```
 
+`SEC_USER_AGENT` is required. CALDUN fails clearly when it is absent rather than sending anonymous/default SEC requests.
+
+## Tests
+
+```bash
+npm test
+npm run check
+```
+
+The deterministic test suite covers annual SEC period selection, restatement preference, aligned balance-sheet snapshots, share-class aggregation, DCF math, invalid WACC/terminal-growth combinations, and missing equity-bridge data.
+
 ## Netlify
 
-The app is configured for Netlify with `public/` as the publish directory and `netlify/functions/` for serverless functions.
-
-Optional environment variable:
-
-- `SEC_USER_AGENT` — descriptive user agent for SEC requests, e.g. `CALDUN Research your-email@example.com`
+The app is configured for Netlify with `public/` as the publish directory and `netlify/functions/` for serverless functions. Set `SEC_USER_AGENT` in the Netlify environment before deploying.
