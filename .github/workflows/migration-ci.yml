@@ -1,8 +1,9 @@
-name: Migration CI
+name: Caldun CI
 
 on:
   push:
     branches:
+      - main
       - nextjs-typescript-migration
   pull_request:
     branches:
@@ -68,3 +69,58 @@ jobs:
           STATUS=$(curl --silent --show-error --output /tmp/caldun-invalid.json --write-out "%{http_code}" "http://127.0.0.1:3000/api/company?ticker=!!!")
           test "$STATUS" = "400"
           node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('/tmp/caldun-invalid.json','utf8')); if (!data.error) process.exit(1);"
+
+  production-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Allow Netlify production deployment to publish
+        run: sleep 55
+
+      - name: Verify live homepage
+        run: |
+          curl --fail --silent --show-error --max-time 20 https://caldun.netlify.app/ > /tmp/caldun-home.html
+          grep -q "Understand the business" /tmp/caldun-home.html
+
+      - name: Verify live real-company fundamentals
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for TICKER in AAPL MSFT WMT; do
+            OK=0
+            for ATTEMPT in 1 2 3; do
+              STATUS=$(curl --silent --show-error --max-time 25 \
+                --output "/tmp/${TICKER}.json" \
+                --write-out "%{http_code}" \
+                "https://caldun.netlify.app/api/company?ticker=${TICKER}" || true)
+
+              if [ "$STATUS" = "200" ]; then
+                TICKER="$TICKER" node - <<'NODE'
+          const fs = require('fs');
+          const ticker = process.env.TICKER;
+          const data = JSON.parse(fs.readFileSync(`/tmp/${ticker}.json`, 'utf8'));
+          if (data.ticker !== ticker) throw new Error(`Ticker mismatch for ${ticker}`);
+          if (!Array.isArray(data.financials) || data.financials.length < 3) throw new Error(`Insufficient financial history for ${ticker}`);
+          const usableRevenue = data.financials.filter((row) => Number.isFinite(row.revenue));
+          if (usableRevenue.length < 3) throw new Error(`Insufficient revenue history for ${ticker}`);
+          if (!data.balanceSheet || typeof data.balanceSheet !== 'object') throw new Error(`Missing balance sheet for ${ticker}`);
+          if (!data.source?.includes('SEC')) throw new Error(`Unexpected source for ${ticker}`);
+          NODE
+                OK=1
+                break
+              fi
+
+              echo "${TICKER} attempt ${ATTEMPT} returned HTTP ${STATUS}:"
+              cat "/tmp/${TICKER}.json" || true
+              echo
+              sleep 15
+            done
+
+            if [ "$OK" -ne 1 ]; then
+              echo "Production ticker smoke test failed for ${TICKER}."
+              exit 1
+            fi
+          done
