@@ -1,0 +1,46 @@
+name: Apply bridge security fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-bridge-security.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pin bridge requests to the Netlify site URL
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('src/app/api/company/route.ts')
+          text = path.read_text()
+
+          old = "return process.env.NETLIFY === 'true' || request.nextUrl.hostname.toLowerCase().endsWith('.netlify.app');"
+          new = "return Boolean(process.env.SITE_ID) || request.nextUrl.hostname.toLowerCase().endsWith('.netlify.app');"
+          if old not in text:
+              raise SystemExit('Netlify detection pattern not found')
+          text = text.replace(old, new, 1)
+
+          old = "  const url = new URL('/api/sec-bridge', request.nextUrl.origin);"
+          new = """  const siteUrl = process.env.URL?.trim();\n  if (!siteUrl) {\n    throw new SecRequestError('Caldun Netlify site URL is not configured.', 500);\n  }\n\n  const url = new URL('/api/sec-bridge', siteUrl);"""
+          if old not in text:
+              raise SystemExit('Bridge origin pattern not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/company/route.ts
+          git commit -m "Pin SEC bridge calls to Netlify site origin"
+          git push origin HEAD:main
