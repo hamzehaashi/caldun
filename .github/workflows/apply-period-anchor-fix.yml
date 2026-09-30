@@ -1,0 +1,72 @@
+name: Apply period anchor fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-period-anchor-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply latest annual period anchor fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          sec = Path('src/lib/sec-data.ts')
+          text = sec.read_text()
+          marker = "function instantCandidatesAtDate("
+          helper = '''export function latestPeriodEnd(...maps: Array<Map<string, SecUnit>>): string | null {\n  const ends = [...new Set(maps.flatMap((map) => [...map.keys()]))]\n    .filter(Boolean)\n    .sort((a, b) => a.localeCompare(b));\n  return ends.at(-1) || null;\n}\n\n'''
+          if helper not in text:
+              if marker not in text:
+                  raise SystemExit('sec-data insertion marker not found')
+              text = text.replace(marker, helper + marker, 1)
+              sec.write_text(text)
+
+          route = Path('src/app/api/company/route.ts')
+          text = route.read_text()
+          old = "  latestInstantForTags,\n  seriesForTags,"
+          new = "  latestInstantForTags,\n  latestPeriodEnd,\n  seriesForTags,"
+          if old not in text:
+              raise SystemExit('route import marker not found')
+          text = text.replace(old, new, 1)
+          old = "    const asOf = periodEnds.at(-1) || null;"
+          new = "    const asOf = latestPeriodEnd(revenue, operatingIncome, netIncome, operatingCashFlow) ?? periodEnds.at(-1) ?? null;"
+          if old not in text:
+              raise SystemExit('route asOf marker not found')
+          route.write_text(text.replace(old, new, 1))
+
+          tests = Path('tests/sec-data.test.ts')
+          text = tests.read_text()
+          old = "  instantForTagsAtDate,\n  seriesForTags,"
+          new = "  instantForTagsAtDate,\n  latestPeriodEnd,\n  seriesForTags,"
+          if old not in text:
+              raise SystemExit('test import marker not found')
+          text = text.replace(old, new, 1)
+          test_block = '''\n\ntest('latestPeriodEnd uses the newest annual period across core statement series', () => {\n  const revenue = new Map([['2024-12-31', { end: '2024-12-31', val: 100 } as SecUnit]]);\n  const operatingCashFlow = new Map([\n    ['2024-12-31', { end: '2024-12-31', val: 20 } as SecUnit],\n    ['2025-12-31', { end: '2025-12-31', val: 25 } as SecUnit],\n  ]);\n  assert.equal(latestPeriodEnd(revenue, operatingCashFlow), '2025-12-31');\n});\n'''
+          if "latestPeriodEnd uses the newest annual period" not in text:
+              text += test_block
+          tests.write_text(text)
+
+      - name: Run focused tests
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/sec-data.ts src/app/api/company/route.ts tests/sec-data.test.ts
+          git commit -m "Anchor balance sheet to latest annual statement period"
+          git push origin HEAD:main
