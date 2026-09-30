@@ -1,0 +1,37 @@
+name: SEC Egress Diagnostic
+
+on:
+  push:
+    branches:
+      - diagnostic-sec-preview
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe SEC from GitHub runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          UA='CALDUN Research 125228874+hamzehaashi@users.noreply.github.com https://github.com/hamzehaashi/caldun'
+          for URL in \
+            'https://www.sec.gov/files/company_tickers.json' \
+            'https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json'; do
+            STATUS=$(curl --silent --show-error --max-time 20 \
+              -A "$UA" \
+              -H 'Accept: application/json' \
+              --output /tmp/sec-response.txt \
+              --write-out '%{http_code}' \
+              "$URL" || true)
+            echo "URL: $URL"
+            echo "HTTP: $STATUS"
+            if [ "$STATUS" != '200' ]; then
+              head -c 800 /tmp/sec-response.txt || true
+              echo
+              exit 1
+            fi
+          done
