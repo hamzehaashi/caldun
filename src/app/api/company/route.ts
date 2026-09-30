@@ -116,8 +116,8 @@ async function fetchDirectJson<T>(url: string, revalidate: number): Promise<T> {
   throw lastError ?? new SecRequestError('SEC request failed.', 502);
 }
 
-function onNetlifyRuntime() {
-  return process.env.NETLIFY === 'true' || Boolean(process.env.CONTEXT);
+function shouldUseSecBridge(request: NextRequest) {
+  return request.nextUrl.hostname.toLowerCase().endsWith('.netlify.app');
 }
 
 async function fetchBridgeJson<T>(
@@ -157,7 +157,7 @@ async function fetchSecResource<T>(
   revalidate: number,
   cik?: string,
 ): Promise<T> {
-  if (onNetlifyRuntime()) {
+  if (shouldUseSecBridge(request)) {
     return fetchBridgeJson<T>(request, resource, cik);
   }
 
@@ -238,8 +238,6 @@ export async function GET(request: NextRequest) {
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
 
-    // Revenue is the canonical annual period anchor. A stray period from another
-    // concept must not displace a usable revenue year or move the balance-sheet date.
     const periodEnds = (revenuePeriodEnds.length ? revenuePeriodEnds : fallbackPeriodEnds).slice(-5);
 
     const financials = periodEnds.map((periodEnd) => {
