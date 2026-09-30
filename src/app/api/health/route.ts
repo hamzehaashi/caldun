@@ -6,9 +6,8 @@ export async function GET() {
   return NextResponse.json(
     {
       status: 'ok',
-      commit: process.env.COMMIT_REF || null,
-      branch: process.env.BRANCH || null,
-      deployId: process.env.DEPLOY_ID || null,
+      commit: process.env.CALDUN_BUILD_COMMIT || null,
+      branch: process.env.CALDUN_BUILD_BRANCH || null,
     },
     {
       headers: {
