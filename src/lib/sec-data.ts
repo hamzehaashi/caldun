@@ -81,6 +81,13 @@ export function seriesForTags(
   );
 }
 
+export function latestPeriodEnd(...maps: Array<Map<string, SecUnit>>): string | null {
+  const ends = [...new Set(maps.flatMap((map) => [...map.keys()]))]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return ends.at(-1) || null;
+}
+
 function instantCandidatesAtDate(
   fact: CompanyFact | undefined,
   date: string,

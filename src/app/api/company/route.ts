@@ -3,6 +3,7 @@ import {
   getPeriodValue,
   instantForTagsAtDate,
   latestInstantForTags,
+  latestPeriodEnd,
   seriesForTags,
   sumNullable,
   sumShareClassesAtDate,
@@ -283,7 +284,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const asOf = periodEnds.at(-1) || null;
+    const asOf = latestPeriodEnd(revenue, operatingIncome, netIncome, operatingCashFlow) ?? periodEnds.at(-1) ?? null;
 
     const cashItem = asOf
       ? instantForTagsAtDate(

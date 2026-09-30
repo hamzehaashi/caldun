@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   annualSeries,
   instantForTagsAtDate,
+  latestPeriodEnd,
   seriesForTags,
   sumNullable,
   sumShareClassesAtDate,
@@ -91,4 +92,14 @@ test('share classes can be summed for one filing date', () => {
 test('sumNullable preserves missing debt instead of coercing it to zero', () => {
   assert.equal(sumNullable(null, null), null);
   assert.equal(sumNullable(10, null), 10);
+});
+
+
+test('latestPeriodEnd uses the newest annual period across core statement series', () => {
+  const revenue = new Map([['2024-12-31', { end: '2024-12-31', val: 100 } as SecUnit]]);
+  const operatingCashFlow = new Map([
+    ['2024-12-31', { end: '2024-12-31', val: 20 } as SecUnit],
+    ['2025-12-31', { end: '2025-12-31', val: 25 } as SecUnit],
+  ]);
+  assert.equal(latestPeriodEnd(revenue, operatingCashFlow), '2025-12-31');
 });
