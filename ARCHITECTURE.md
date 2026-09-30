@@ -1,22 +1,42 @@
 # CALDUN — Architecture
 
-## Runtime
+## Request path
 
-- Static frontend: `public/index.html`, `public/styles.css`, `public/phase0.css`, `public/app.js`.
-- Pure valuation helpers: `public/model.js`.
-- Serverless backend: Netlify Function `netlify/functions/company.mts`.
-- SEC normalization helpers: `netlify/functions/sec-data.mjs`.
+Browser / React workspace
+→ Next.js route handler (`src/app/api/company/route.ts`)
+→ SEC ticker directory + Company Facts
+→ typed normalization helpers (`src/lib/sec-data.ts`)
+→ normalized `CompanyData`
+→ React analyst workspace
+→ pure valuation engine (`src/lib/model.ts`)
 
-## Data flow
+## Boundaries
 
-Ticker → SEC ticker map → SEC Company Facts → annual-duration/period selection → normalized historical rows + aligned balance-sheet snapshot → browser forecast assumptions → DCF → sensitivity/memo.
+### UI
+`src/components/caldun-workspace.tsx`
 
-## Correctness boundaries
+Owns user interaction, analyst assumptions, memo state, formatting, navigation, and presentation. It does not parse SEC payloads.
 
-- SEC selection and normalization logic is isolated from the HTTP handler enough to be fixture-tested.
-- DCF math is isolated from the DOM and takes explicit financials, balance-sheet values, assumptions, and overrides.
-- Missing SEC values remain `null`; they are not converted to zero for valuation convenience.
+### Financial calculations
+`src/lib/model.ts`
 
-## Deferred architecture
+Pure functions. No DOM, React state, network requests, or global mutable state.
 
-A component framework, database, authentication, caching infrastructure, and market-data provider are intentionally deferred until the data layer and valuation engine justify them.
+### SEC normalization
+`src/lib/sec-data.ts`
+
+Selects annual duration facts by actual period dates, resolves amendments/restatements, anchors instant facts to explicit dates, and preserves missing values.
+
+### API boundary
+`src/app/api/company/route.ts`
+
+Keeps SEC request identity server-side, fetches raw SEC data, maps tags into normalized company financials, and returns a stable API shape to the client.
+
+### Domain types
+`src/types/finance.ts`
+
+Shared types for the financial data contract and valuation engine.
+
+## Deployment
+
+Netlify builds the Next.js application with `next build` and uses its maintained OpenNext adapter automatically. No pinned legacy Next.js Netlify plugin is required.
