@@ -63,13 +63,22 @@ export function seriesForTags(
   tags: string[],
   preferredUnits: string[] = ['USD'],
 ): Map<string, SecUnit> {
+  const merged = new Map<string, SecUnit>();
+
+  // Companies often change XBRL tags across years. Merge periods across the
+  // ordered candidate tags instead of choosing one tag for the entire history.
+  // Earlier tags in `tags` retain priority for overlapping periods.
   for (const tag of tags) {
     const series = annualSeries(facts?.[tag], preferredUnits);
-    if (series.length) {
-      return new Map(series.map((item) => [item.end!, { ...item, tag }]));
+    for (const item of series) {
+      if (!item.end || merged.has(item.end)) continue;
+      merged.set(item.end, { ...item, tag });
     }
   }
-  return new Map();
+
+  return new Map(
+    [...merged.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-6),
+  );
 }
 
 function instantCandidatesAtDate(
@@ -82,6 +91,12 @@ function instantCandidatesAtDate(
   );
 }
 
+function annualFormPriority(item: SecUnit): number {
+  if (item.form === '10-K/A') return 3;
+  if (item.form === '10-K') return 2;
+  return 1;
+}
+
 export function instantForTagsAtDate(
   facts: Record<string, CompanyFact>,
   tags: string[],
@@ -92,6 +107,8 @@ export function instantForTagsAtDate(
     const candidates = instantCandidatesAtDate(facts?.[tag], date, preferredUnits);
     if (!candidates.length) continue;
     candidates.sort((a, b) => {
+      const formDelta = annualFormPriority(b) - annualFormPriority(a);
+      if (formDelta) return formDelta;
       if ((a.filed || '') !== (b.filed || '')) {
         return (b.filed || '').localeCompare(a.filed || '');
       }
