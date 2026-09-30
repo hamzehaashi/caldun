@@ -1,0 +1,70 @@
+name: Migration CI
+
+on:
+  push:
+    branches:
+      - nextjs-typescript-migration
+  pull_request:
+    branches:
+      - phase-0-correctness
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run regression tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+        env:
+          SEC_USER_AGENT: CALDUN-CI ci@example.invalid
+
+      - name: Runtime smoke test
+        shell: bash
+        env:
+          SEC_USER_AGENT: CALDUN-CI ci@example.invalid
+        run: |
+          npm run start > /tmp/caldun-next.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          READY=0
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/ > /tmp/caldun-home.html; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            cat /tmp/caldun-next.log
+            exit 1
+          fi
+
+          grep -q "Understand the business" /tmp/caldun-home.html
+
+          STATUS=$(curl --silent --show-error --output /tmp/caldun-invalid.json --write-out "%{http_code}" "http://127.0.0.1:3000/api/company?ticker=!!!")
+          test "$STATUS" = "400"
+          node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('/tmp/caldun-invalid.json','utf8')); if (!data.error) process.exit(1);"

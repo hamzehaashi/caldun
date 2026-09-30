@@ -1,42 +1,63 @@
-# Caldun — Roadmap
+# CALDUN — Roadmap
 
-Correctness comes first, then structure, then new modules. Each phase keeps the app runnable and deployable.
+Correctness first, then typed architecture, then analyst modules.
 
-## Phase 0: Make the numbers right
+## Phase 0 — Financial correctness
 
-Status: implementation prepared on `phase-0-correctness`.
+Completed on the parent Phase 0 branch and preserved in the Next.js migration:
 
-- Fix annual SEC period selection using period start/end and roughly 12-month durations.
-- Prefer the latest filing for a repeated period so amendments/restatements win.
-- Align balance-sheet data to the latest annual period end and expose dates.
-- Preserve missing debt as missing and avoid a false zero-debt equity bridge.
-- Add deterministic tests for SEC mapping and DCF math.
-- Preserve analyst memo edits during recalculation.
-- Validate WACC > terminal growth.
-- Show per-share value to cents and label assumption provenance.
-- Require `SEC_USER_AGENT`.
+- annual SEC period selection by actual dates and duration
+- latest amendment/restatement preference
+- annual balance-sheet date alignment
+- missing debt preservation
+- share-class handling
+- DCF validation
+- memo preservation
+- deterministic tests
 
-## Phase 1: Financial data layer
+## Phase 1A — Next.js + TypeScript migration (in progress)
 
-- Add per-value provenance: XBRL tag, form, accession, filed date, period start/end, and reported/calculated/missing state.
-- Introduce an explicit fiscal-period model.
-- Add data-quality validation, stale-data flags, retries/backoff, rate-limit handling, and ticker caching.
-- Add point-in-time queries using filing dates to prevent look-ahead bias.
+- [x] Next.js App Router scaffold
+- [x] React workspace migration
+- [x] strict TypeScript domain model
+- [x] SEC endpoint moved to a Next.js route handler
+- [x] DCF and SEC normalization moved to typed library modules
+- [x] Netlify config migrated to native Next.js build
+- [x] tests ported to TypeScript
+- [x] generate and commit a dependency lockfile
+- [x] clean Node 22 install + strict typecheck + regression tests + production build
+- [x] runtime smoke test for the built Next.js app and `/api/company` route
+- [x] Netlify deploy-preview validation
+- [ ] real-company regression pass (calendar and non-calendar fiscal years)
 
-## Phase 2: Valuation engine
+## Phase 1B — Financial data layer
 
-- Continue extracting valuation logic into standalone testable modules.
-- Expand the equity bridge, support mid-year discounting, and add exit-multiple terminal value.
-- Add a transparent WACC build-up after a market-data provider is selected.
+- provenance per value: tag, form, accession, filed date, period, status
+- explicit fiscal-period model
+- validation flags and stale-data indicators
+- retry/backoff and request timeout strategy
+- point-in-time queries using filed dates
 
-## Phase 3: Analyst UX
+## Phase 2 — Valuation engine
 
-- Dense sortable tables, keyboard navigation, richer statement views, quarterly data, and CSV/Excel/PDF export.
+- WACC build-up once a market-data provider is selected
+- expanded enterprise-to-equity bridge
+- mid-year convention
+- exit-multiple terminal value
 
-## Phase 4: Research modules
+## Phase 3 — Analyst UX
 
-Scenarios → arbitrary two-input sensitivity → comparable companies → valuation history → thesis/risks → memo generation.
+- reusable high-density statement tables
+- sorting/filtering
+- keyboard shortcuts
+- CSV/Excel export
+- PDF memo export
+- customizable workspace views
 
-## Phase 5: Persistence and accounts
+## Phase 4 — Research modules
 
-Saved models, versioning, and authentication only after the core research workflow is worth persisting.
+Scenarios → sensitivity on arbitrary inputs → comps → valuation history → thesis/risk workflow → memo generation.
+
+## Phase 5 — Persistence and accounts
+
+Saved models, versioning, authentication, and persistence only after the analyst workflow warrants them.

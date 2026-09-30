@@ -1,7 +1,10 @@
 [build]
-  publish = "public"
-  functions = "netlify/functions"
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
 
 [dev]
-  publish = "public"
-  functions = "netlify/functions"
+  command = "npm run dev"
+  targetPort = 3000

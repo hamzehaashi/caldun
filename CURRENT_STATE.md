@@ -1,28 +1,30 @@
 # CALDUN — Current State
 
-## What exists
+## Current architecture
 
-- Vanilla HTML/CSS/JavaScript analyst workspace in `public/`.
-- Netlify Function in `netlify/functions/company.mts` for SEC ticker lookup and Company Facts ingestion.
-- SEC-derived annual fundamentals, simple forecast assumptions, five-year DCF, WACC/terminal-growth sensitivity, and editable investment memo.
-- Deterministic Node tests for the core Phase 0 correctness rules.
+CALDUN is now being migrated from a vanilla HTML/JavaScript MVP to a Next.js App Router application using React and TypeScript.
 
-## Phase 0 correctness changes
+### Implemented
 
-- Annual flow facts are selected by actual start/end period, restricted to roughly 12-month 10-K/10-K/A durations, and deduplicated by period using the latest filed fact.
-- Balance-sheet cash/debt are aligned to the latest annual period end instead of independently taking the latest instant fact.
-- Missing debt remains missing; the DCF no longer silently assumes zero debt.
-- Share counts prefer an aligned total, can aggregate share classes when needed, and expose the share-count date separately when the best available count is from another date.
-- DCF math lives in a small DOM-independent module so it can be unit tested.
-- WACC <= terminal growth produces a clear validation message instead of leaving stale valuation output.
-- Memo edits persist while assumptions are recalculated.
-- Assumptions are labeled as historically derived, default, or analyst-entered.
-- Per-share valuation is displayed to cents.
-- `SEC_USER_AGENT` is required.
+- Next.js App Router application shell.
+- React client workspace for ticker search, overview, historical financials, forecast assumptions, DCF valuation, sensitivity analysis, and editable memo sections.
+- Typed domain models for company financials, SEC facts, assumptions, forecasts, and DCF outputs.
+- Server-side `/api/company` route handler for SEC requests; `SEC_USER_AGENT` is never exposed to the browser.
+- Phase 0 SEC period-selection logic preserved in `src/lib/sec-data.ts`.
+- DOM-independent DCF engine preserved in `src/lib/model.ts`.
+- Strict TypeScript configuration.
+- Deterministic tests covering SEC annual-period selection, amendments/restatements, balance-sheet date anchoring, share classes, DCF math, WACC/g validation, and missing debt.
+- Netlify configuration updated for native modern Next.js support.
 
-## Known limitations
+### Still intentionally deferred
 
-- Fiscal-year labels still use period-end calendar year; a richer fiscal-period model belongs in Phase 1.
-- The application has no database, authentication, saved models, or market-data provider.
-- SEC retries/backoff, richer provenance, stale-data rules, and point-in-time query controls are still Phase 1 work.
-- Comparable companies, scenarios, valuation history, and generated research modules are not yet implemented.
+- Market-data provider and market prices.
+- WACC build-up using live market inputs.
+- Comparable companies.
+- Persistence/authentication.
+- Database infrastructure.
+- Quarterly statement normalization.
+
+## Migration status
+
+The Next.js migration is staged on its own branch and should be deploy-previewed and tested against several real issuers before replacing the current production branch.
