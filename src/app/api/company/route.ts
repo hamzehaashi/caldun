@@ -13,6 +13,7 @@ const SEC_WEB_BASE = 'https://www.sec.gov';
 const SEC_DATA_BASE = 'https://data.sec.gov';
 const SEC_MIN_REQUEST_GAP_MS = 250;
 const SEC_RETRY_DELAYS_MS = [750, 1_500, 3_000];
+const REQUEST_TIMEOUT_MS = 15_000;
 
 let lastSecRequestAt = 0;
 
@@ -51,7 +52,6 @@ function secHeaders(): HeadersInit {
     'User-Agent': userAgent,
     Accept: 'application/json',
     'Accept-Encoding': 'gzip, deflate',
-    Referer: 'https://caldun.netlify.app/',
   };
 }
 
@@ -62,20 +62,33 @@ function parseRetryAfter(value: string | null): number | null {
   return null;
 }
 
-async function fetchJson<T>(url: string, revalidate: number): Promise<T> {
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new SecRequestError('SEC request timed out.', 504);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchDirectJson<T>(url: string, revalidate: number): Promise<T> {
   let lastError: SecRequestError | null = null;
 
   for (let attempt = 0; attempt <= SEC_RETRY_DELAYS_MS.length; attempt += 1) {
     await paceSecRequest();
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: secHeaders(),
       next: { revalidate },
-    });
+    } as RequestInit & { next: { revalidate: number } });
 
-    if (response.ok) {
-      return response.json() as Promise<T>;
-    }
+    if (response.ok) return response.json() as Promise<T>;
 
     const body = await response.text().catch(() => '');
     const rateLimited =
@@ -85,27 +98,72 @@ async function fetchJson<T>(url: string, revalidate: number): Promise<T> {
       body.includes('Undeclared Automated Tool');
     const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
 
-    const suffix = rateLimited
-      ? ' — SEC temporarily limited this server request.'
-      : '';
-
     lastError = new SecRequestError(
-      `SEC request failed (${response.status})${suffix}`,
+      `SEC request failed (${response.status})${rateLimited ? ' — SEC temporarily limited this request.' : ''}`,
       response.status,
       retryAfter,
     );
 
     const retryable = rateLimited || response.status >= 500;
-    if (!retryable || attempt === SEC_RETRY_DELAYS_MS.length) {
-      throw lastError;
-    }
+    if (!retryable || attempt === SEC_RETRY_DELAYS_MS.length) throw lastError;
 
     const baseDelay = retryAfter ? retryAfter * 1_000 : SEC_RETRY_DELAYS_MS[attempt];
-    const jitter = Math.floor(Math.random() * 250);
-    await sleep(baseDelay + jitter);
+    await sleep(baseDelay + Math.floor(Math.random() * 250));
   }
 
   throw lastError ?? new SecRequestError('SEC request failed.', 502);
+}
+
+function onNetlifyRuntime() {
+  return process.env.NETLIFY === 'true' || Boolean(process.env.CONTEXT);
+}
+
+async function fetchBridgeJson<T>(
+  request: NextRequest,
+  resource: 'tickers' | 'companyfacts',
+  cik?: string,
+): Promise<T> {
+  const url = new URL('/api/sec-bridge', request.nextUrl.origin);
+  url.searchParams.set('resource', resource);
+  if (cik) url.searchParams.set('cik', cik);
+
+  const response = await fetchWithTimeout(url.toString(), {
+    method: 'GET',
+    cache: 'no-store',
+  });
+
+  if (response.ok) return response.json() as Promise<T>;
+
+  let message = `SEC bridge failed (${response.status}).`;
+  try {
+    const body = (await response.json()) as { error?: string };
+    if (body.error) message = body.error;
+  } catch {
+    // Keep the status-based message when the bridge does not return JSON.
+  }
+
+  throw new SecRequestError(
+    message,
+    response.status,
+    parseRetryAfter(response.headers.get('retry-after')),
+  );
+}
+
+async function fetchSecResource<T>(
+  request: NextRequest,
+  resource: 'tickers' | 'companyfacts',
+  revalidate: number,
+  cik?: string,
+): Promise<T> {
+  if (onNetlifyRuntime()) {
+    return fetchBridgeJson<T>(request, resource, cik);
+  }
+
+  const url = resource === 'tickers'
+    ? `${SEC_WEB_BASE}/files/company_tickers.json`
+    : `${SEC_DATA_BASE}/api/xbrl/companyfacts/CIK${cik}.json`;
+
+  return fetchDirectJson<T>(url, revalidate);
 }
 
 function firstPeriodItem(endDate: string, ...maps: Array<Map<string, SecUnit>>): SecUnit | null {
@@ -124,9 +182,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Enter a valid ticker symbol.' }, { status: 400 });
     }
 
-    const tickers = await fetchJson<
+    const tickers = await fetchSecResource<
       Record<string, { cik_str: number; ticker: string; title: string }>
-    >(`${SEC_WEB_BASE}/files/company_tickers.json`, 604_800);
+    >(request, 'tickers', 604_800);
 
     const company = Object.values(tickers).find(
       (item) => item.ticker.toUpperCase() === ticker,
@@ -137,9 +195,11 @@ export async function GET(request: NextRequest) {
     }
 
     const cik = String(company.cik_str).padStart(10, '0');
-    const payload = await fetchJson<CompanyFactsPayload>(
-      `${SEC_DATA_BASE}/api/xbrl/companyfacts/CIK${cik}.json`,
+    const payload = await fetchSecResource<CompanyFactsPayload>(
+      request,
+      'companyfacts',
       21_600,
+      cik,
     );
 
     const gaap = (payload.facts?.['us-gaap'] || {}) as Record<string, CompanyFact>;
@@ -302,21 +362,29 @@ export async function GET(request: NextRequest) {
       {
         headers: {
           'Cache-Control': 'public, max-age=300, s-maxage=21600, stale-while-revalidate=86400',
+          'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=21600, stale-while-revalidate=86400',
         },
       },
     );
   } catch (error) {
-    if (error instanceof SecRequestError && (error.status === 403 || error.status === 429)) {
+    if (error instanceof SecRequestError && (error.status === 403 || error.status === 429 || error.status === 503)) {
       const retryAfter = error.retryAfterSeconds ?? 60;
       return NextResponse.json(
         {
           error:
-            'SEC is temporarily limiting requests from Caldun’s hosting network. Caldun will retry automatically; please try this ticker again shortly.',
+            'SEC is temporarily limiting Caldun’s data request. Please retry shortly; cached company data will continue to be served when available.',
         },
         {
           status: 503,
           headers: { 'Retry-After': String(retryAfter) },
         },
+      );
+    }
+
+    if (error instanceof SecRequestError && error.status === 504) {
+      return NextResponse.json(
+        { error: 'SEC did not respond before Caldun’s timeout. Please retry this ticker.' },
+        { status: 504 },
       );
     }
 
