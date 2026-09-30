@@ -117,7 +117,7 @@ async function fetchDirectJson<T>(url: string, revalidate: number): Promise<T> {
 }
 
 function shouldUseSecBridge(request: NextRequest) {
-  return request.nextUrl.hostname.toLowerCase().endsWith('.netlify.app');
+  return process.env.NETLIFY === 'true' || request.nextUrl.hostname.toLowerCase().endsWith('.netlify.app');
 }
 
 async function fetchBridgeJson<T>(
@@ -125,6 +125,11 @@ async function fetchBridgeJson<T>(
   resource: 'tickers' | 'companyfacts',
   cik?: string,
 ): Promise<T> {
+  const bridgeToken = process.env.SEC_BRIDGE_TOKEN?.trim();
+  if (!bridgeToken) {
+    throw new SecRequestError('Caldun SEC bridge is not configured.', 500);
+  }
+
   const url = new URL('/api/sec-bridge', request.nextUrl.origin);
   url.searchParams.set('resource', resource);
   if (cik) url.searchParams.set('cik', cik);
@@ -132,6 +137,9 @@ async function fetchBridgeJson<T>(
   const response = await fetchWithTimeout(url.toString(), {
     method: 'GET',
     cache: 'no-store',
+    headers: {
+      'x-caldun-bridge-token': bridgeToken,
+    },
   });
 
   if (response.ok) return response.json() as Promise<T>;
