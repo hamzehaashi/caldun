@@ -33,6 +33,31 @@ test('seriesForTags falls through tags that exist but have no usable annual fact
   assert.equal(series.get('2024-12-31')?.tag, 'Fallback');
 });
 
+test('seriesForTags merges annual history when a filer changes XBRL tags', () => {
+  const facts = {
+    NewTag: fact([
+      { start: '2023-01-01', end: '2023-12-31', val: 130, form: '10-K', filed: '2024-02-01' },
+      { start: '2024-01-01', end: '2024-12-31', val: 140, form: '10-K', filed: '2025-02-01' },
+    ]),
+    OldTag: fact([
+      { start: '2021-01-01', end: '2021-12-31', val: 100, form: '10-K', filed: '2022-02-01' },
+      { start: '2022-01-01', end: '2022-12-31', val: 115, form: '10-K', filed: '2023-02-01' },
+      { start: '2023-01-01', end: '2023-12-31', val: 999, form: '10-K', filed: '2024-02-01' },
+    ]),
+  };
+
+  const series = seriesForTags(facts, ['NewTag', 'OldTag']);
+  assert.deepEqual(
+    [...series.entries()].map(([end, item]) => [end, item.val, item.tag]),
+    [
+      ['2021-12-31', 100, 'OldTag'],
+      ['2022-12-31', 115, 'OldTag'],
+      ['2023-12-31', 130, 'NewTag'],
+      ['2024-12-31', 140, 'NewTag'],
+    ],
+  );
+});
+
 test('instantForTagsAtDate anchors the balance-sheet fact to the requested date', () => {
   const facts = { Cash: fact([
     { end: '2024-12-31', val: 10, form: '10-K', filed: '2025-02-01', accn: 'a' },
@@ -42,6 +67,16 @@ test('instantForTagsAtDate anchors the balance-sheet fact to the requested date'
   const item = instantForTagsAtDate(facts, ['Cash'], '2024-12-31');
   assert.equal(item?.val, 11);
   assert.equal(item?.end, '2024-12-31');
+});
+
+test('instantForTagsAtDate prefers annual forms over a later-filed non-annual fact at the same date', () => {
+  const facts = { Cash: fact([
+    { end: '2024-12-31', val: 10, form: '10-K', filed: '2025-02-01', accn: 'annual' },
+    { end: '2024-12-31', val: 99, form: '8-K', filed: '2025-04-01', accn: 'later' },
+  ]) };
+  const item = instantForTagsAtDate(facts, ['Cash'], '2024-12-31');
+  assert.equal(item?.val, 10);
+  assert.equal(item?.form, '10-K');
 });
 
 test('share classes can be summed for one filing date', () => {
