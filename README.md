@@ -6,6 +6,7 @@ CALDUN is an investment research workspace that turns a public-company ticker in
 
 - https://caldun.netlify.app
 - Production deploys are validated with live ticker smoke tests before being treated as healthy.
+- A deployment is not considered healthy while its real-ticker smoke tests are failing.
 
 ## Stack
 
