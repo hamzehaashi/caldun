@@ -5,6 +5,9 @@
 [build.environment]
   NODE_VERSION = "22"
 
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 [dev]
   command = "npm run dev"
   targetPort = 3000
