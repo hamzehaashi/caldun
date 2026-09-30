@@ -1,3 +1,4 @@
+# One-shot workflow; delete after successful patch.
 name: UI Hardening Once
 
 on:
