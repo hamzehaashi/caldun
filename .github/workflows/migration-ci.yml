@@ -98,17 +98,7 @@ jobs:
                 "https://caldun.netlify.app/api/company?ticker=${TICKER}" || true)
 
               if [ "$STATUS" = "200" ]; then
-                TICKER="$TICKER" node - <<'NODE'
-          const fs = require('fs');
-          const ticker = process.env.TICKER;
-          const data = JSON.parse(fs.readFileSync(`/tmp/${ticker}.json`, 'utf8'));
-          if (data.ticker !== ticker) throw new Error(`Ticker mismatch for ${ticker}`);
-          if (!Array.isArray(data.financials) || data.financials.length < 3) throw new Error(`Insufficient financial history for ${ticker}`);
-          const usableRevenue = data.financials.filter((row) => Number.isFinite(row.revenue));
-          if (usableRevenue.length < 3) throw new Error(`Insufficient revenue history for ${ticker}`);
-          if (!data.balanceSheet || typeof data.balanceSheet !== 'object') throw new Error(`Missing balance sheet for ${ticker}`);
-          if (!data.source?.includes('SEC')) throw new Error(`Unexpected source for ${ticker}`);
-          NODE
+                TICKER="$TICKER" node -e "const fs=require('fs'); const ticker=process.env.TICKER; const data=JSON.parse(fs.readFileSync('/tmp/'+ticker+'.json','utf8')); if(data.ticker!==ticker) throw new Error('Ticker mismatch'); if(!Array.isArray(data.financials)||data.financials.length<3) throw new Error('Insufficient financial history'); const usable=data.financials.filter((row)=>Number.isFinite(row.revenue)); if(usable.length<3) throw new Error('Insufficient revenue history'); if(!data.balanceSheet||typeof data.balanceSheet!=='object') throw new Error('Missing balance sheet'); if(!String(data.source||'').includes('SEC')) throw new Error('Unexpected source');"
                 OK=1
                 break
               fi
