@@ -74,15 +74,54 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
-      - name: Allow Netlify production deployment to publish
-        run: sleep 55
+      - name: Wait for this commit to reach Netlify production
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          MATCHED=0
+          for ATTEMPT in $(seq 1 30); do
+            STATUS=$(curl --silent --show-error --max-time 15 \
+              --output /tmp/caldun-health.json \
+              --write-out "%{http_code}" \
+              "https://caldun.netlify.app/api/health?check=${ATTEMPT}" || true)
+
+            if [ "$STATUS" = "200" ]; then
+              DEPLOYED_SHA=$(node -e "const fs=require('fs'); const d=JSON.parse(fs.readFileSync('/tmp/caldun-health.json','utf8')); process.stdout.write(String(d.commit||''));")
+              if [ "$DEPLOYED_SHA" = "$EXPECTED_SHA" ]; then
+                MATCHED=1
+                break
+              fi
+              echo "Netlify is serving ${DEPLOYED_SHA:-unknown}; waiting for ${EXPECTED_SHA}."
+            else
+              echo "Health endpoint returned HTTP ${STATUS}; waiting for deployment."
+            fi
+            sleep 10
+          done
+
+          if [ "$MATCHED" -ne 1 ]; then
+            echo "Netlify did not publish the tested commit within the deployment window."
+            cat /tmp/caldun-health.json 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Verify live homepage
         run: |
           curl --fail --silent --show-error --max-time 20 https://caldun.netlify.app/ > /tmp/caldun-home.html
           grep -q "Understand the business" /tmp/caldun-home.html
+
+      - name: Verify invalid ticker handling
+        shell: bash
+        run: |
+          STATUS=$(curl --silent --show-error --max-time 20 \
+            --output /tmp/invalid.json \
+            --write-out "%{http_code}" \
+            "https://caldun.netlify.app/api/company?ticker=!!!" || true)
+          test "$STATUS" = "400"
+          node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('/tmp/invalid.json','utf8')); if(!data.error) process.exit(1);"
 
       - name: Verify live real-company fundamentals
         shell: bash
@@ -95,7 +134,7 @@ jobs:
               STATUS=$(curl --silent --show-error --max-time 25 \
                 --output "/tmp/${TICKER}.json" \
                 --write-out "%{http_code}" \
-                "https://caldun.netlify.app/api/company?ticker=${TICKER}" || true)
+                "https://caldun.netlify.app/api/company?ticker=${TICKER}&smoke=${GITHUB_RUN_ID}-${ATTEMPT}" || true)
 
               if [ "$STATUS" = "200" ]; then
                 TICKER="$TICKER" node -e "const fs=require('fs'); const ticker=process.env.TICKER; const data=JSON.parse(fs.readFileSync('/tmp/'+ticker+'.json','utf8')); if(data.ticker!==ticker) throw new Error('Ticker mismatch'); if(!Array.isArray(data.financials)||data.financials.length<3) throw new Error('Insufficient financial history'); const usable=data.financials.filter((row)=>Number.isFinite(row.revenue)); if(usable.length<3) throw new Error('Insufficient revenue history'); if(!data.balanceSheet||typeof data.balanceSheet!=='object') throw new Error('Missing balance sheet'); if(!String(data.source||'').includes('SEC')) throw new Error('Unexpected source');"
