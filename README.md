@@ -8,6 +8,7 @@ CALDUN is an investment research workspace that turns a public-company ticker in
 - Production deploys are validated with live ticker smoke tests before being treated as healthy.
 - A deployment is not considered healthy while its real-ticker smoke tests are failing.
 - Analyst-model correctness changes must pass typecheck, regression tests, and a production build before commit.
+- External data transport failures remain open until real-company requests succeed in the deployed environment.
 
 ## Stack
 
