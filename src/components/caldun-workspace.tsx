@@ -429,7 +429,7 @@ function Valuation({
 }) {
   if (!result) return null;
   const ws = [-1, -0.5, 0, 0.5, 1].map((delta) => assumptions.wacc + delta);
-  const gs = [-1, -0.5, 0, 0.5, 1].map((delta) => Math.max(0, assumptions.terminal + delta));
+  const gs = [-1, -0.5, 0, 0.5, 1].map((delta) => assumptions.terminal + delta);
 
   return (
     <section>
@@ -439,7 +439,9 @@ function Valuation({
         <div className="panel valuation-card">
           <div className="valuation-hero"><div className="eyebrow-small">IMPLIED VALUE / SHARE</div><strong>{fmtPerShare(result.perShare)}</strong></div>
           {result.missingEquityBridge?.length ? (
-            <div className="bridge-warning">Per-share value is withheld because {result.missingEquityBridge.join(' and ')} data is missing.</div>
+            <div className="bridge-warning">Equity and per-share value are withheld because {result.missingEquityBridge.join(' and ')} data is missing.</div>
+          ) : result.equity != null && !result.shares ? (
+            <div className="bridge-warning">Per-share value is withheld because a valid shares-outstanding value is unavailable.</div>
           ) : null}
           <div className="valuation-lines">
             <ValueLine label="Enterprise value" value={fmtMoney(result.ev)} />
