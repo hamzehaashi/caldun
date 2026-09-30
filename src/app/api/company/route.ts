@@ -91,21 +91,23 @@ async function fetchDirectJson<T>(url: string, revalidate: number): Promise<T> {
     if (response.ok) return response.json() as Promise<T>;
 
     const body = await response.text().catch(() => '');
+    const undeclaredBot = body.includes('Undeclared Automated Tool');
     const rateLimited =
-      response.status === 429 ||
-      response.status === 403 ||
-      body.includes('Request Rate Threshold Exceeded') ||
-      body.includes('Undeclared Automated Tool');
+      response.status === 429 || body.includes('Request Rate Threshold Exceeded');
     const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
 
-    lastError = new SecRequestError(
-      `SEC request failed (${response.status})${rateLimited ? ' — SEC temporarily limited this request.' : ''}`,
-      response.status,
-      retryAfter,
-    );
+    const message = undeclaredBot
+      ? 'SEC rejected Caldun as an undeclared automated client.'
+      : rateLimited
+        ? 'SEC rate-limited Caldun’s request.'
+        : `SEC request failed (${response.status}).`;
+
+    lastError = new SecRequestError(message, response.status, retryAfter);
 
     const retryable = rateLimited || response.status >= 500;
-    if (!retryable || attempt === SEC_RETRY_DELAYS_MS.length) throw lastError;
+    if (undeclaredBot || response.status === 403 || !retryable || attempt === SEC_RETRY_DELAYS_MS.length) {
+      throw lastError;
+    }
 
     const baseDelay = retryAfter ? retryAfter * 1_000 : SEC_RETRY_DELAYS_MS[attempt];
     await sleep(baseDelay + Math.floor(Math.random() * 250));
@@ -223,17 +225,22 @@ export async function GET(request: NextRequest) {
       'Depreciation',
     ]);
 
-    const periodEnds = [
+    const revenuePeriodEnds = [...revenue.keys()]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    const fallbackPeriodEnds = [
       ...new Set([
-        ...revenue.keys(),
         ...operatingIncome.keys(),
         ...netIncome.keys(),
         ...operatingCashFlow.keys(),
       ]),
     ]
       .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b))
-      .slice(-5);
+      .sort((a, b) => a.localeCompare(b));
+
+    // Revenue is the canonical annual period anchor. A stray period from another
+    // concept must not displace a usable revenue year or move the balance-sheet date.
+    const periodEnds = (revenuePeriodEnds.length ? revenuePeriodEnds : fallbackPeriodEnds).slice(-5);
 
     const financials = periodEnds.map((periodEnd) => {
       const rev = getPeriodValue(revenue, periodEnd);
@@ -278,13 +285,20 @@ export async function GET(request: NextRequest) {
         )
       : null;
 
+    const totalLongDebtItem = asOf
+      ? instantForTagsAtDate(
+          gaap,
+          ['LongTermDebtAndFinanceLeaseObligations', 'LongTermDebt'],
+          asOf,
+        )
+      : null;
+
     const debtCurrentItem = asOf
       ? instantForTagsAtDate(
           gaap,
           [
-            'LongTermDebtCurrent',
             'LongTermDebtAndFinanceLeaseObligationsCurrent',
-            'ShortTermBorrowings',
+            'LongTermDebtCurrent',
           ],
           asOf,
         )
@@ -293,10 +307,22 @@ export async function GET(request: NextRequest) {
     const debtLongItem = asOf
       ? instantForTagsAtDate(
           gaap,
-          ['LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsNoncurrent'],
+          ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent'],
           asOf,
         )
       : null;
+
+    const shortTermBorrowingsItem = asOf
+      ? instantForTagsAtDate(
+          gaap,
+          ['ShortTermBorrowings', 'CommercialPaper'],
+          asOf,
+        )
+      : null;
+
+    const longDebt = totalLongDebtItem?.val ??
+      sumNullable(debtCurrentItem?.val ?? null, debtLongItem?.val ?? null);
+    const debt = sumNullable(longDebt, shortTermBorrowingsItem?.val ?? null);
 
     let shares: number | null = null;
     let sharesAsOf: string | null = null;
@@ -353,7 +379,7 @@ export async function GET(request: NextRequest) {
         balanceSheet: {
           asOf,
           cash: cashItem?.val ?? null,
-          debt: sumNullable(debtCurrentItem?.val ?? null, debtLongItem?.val ?? null),
+          debt,
           sharesOutstanding: shares,
           sharesAsOf,
         },
@@ -367,13 +393,10 @@ export async function GET(request: NextRequest) {
       },
     );
   } catch (error) {
-    if (error instanceof SecRequestError && (error.status === 403 || error.status === 429 || error.status === 503)) {
+    if (error instanceof SecRequestError && (error.status === 429 || error.status === 503)) {
       const retryAfter = error.retryAfterSeconds ?? 60;
       return NextResponse.json(
-        {
-          error:
-            'SEC is temporarily limiting Caldun’s data request. Please retry shortly; cached company data will continue to be served when available.',
-        },
+        { error: error.message },
         {
           status: 503,
           headers: { 'Retry-After': String(retryAfter) },
@@ -386,6 +409,10 @@ export async function GET(request: NextRequest) {
         { error: 'SEC did not respond before Caldun’s timeout. Please retry this ticker.' },
         { status: 504 },
       );
+    }
+
+    if (error instanceof SecRequestError) {
+      return NextResponse.json({ error: error.message }, { status: error.status >= 400 ? error.status : 502 });
     }
 
     const message = error instanceof Error ? error.message : 'Unable to load company data.';
