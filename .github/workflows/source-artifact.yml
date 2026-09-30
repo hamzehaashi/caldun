@@ -7,39 +7,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch-ui:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'Run audited UI patch script'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Apply audited UI/model correctness fixes
-        run: python scripts/patch-ui-once.py
-
-      - name: Install and verify patched tree
-        run: |
-          npm ci
-          npm run typecheck
-          npm test
-          npm run build
-        env:
-          SEC_USER_AGENT: CALDUN-CI ci@example.invalid
-
-      - name: Commit patched workspace
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/components/caldun-workspace.tsx
-          git commit -m "Harden analyst assumptions and error handling"
-          git push origin HEAD:main
-
   package:
     runs-on: ubuntu-latest
     steps:
