@@ -11,6 +11,33 @@ import type { CompanyFact, CompanyFactsPayload, SecUnit } from '@/types/finance'
 
 const SEC_WEB_BASE = 'https://www.sec.gov';
 const SEC_DATA_BASE = 'https://data.sec.gov';
+const SEC_MIN_REQUEST_GAP_MS = 250;
+const SEC_RETRY_DELAYS_MS = [750, 1_500, 3_000];
+
+let lastSecRequestAt = 0;
+
+class SecRequestError extends Error {
+  status: number;
+  retryAfterSeconds: number | null;
+
+  constructor(message: string, status: number, retryAfterSeconds: number | null = null) {
+    super(message);
+    this.name = 'SecRequestError';
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function paceSecRequest() {
+  const now = Date.now();
+  const waitMs = Math.max(0, SEC_MIN_REQUEST_GAP_MS - (now - lastSecRequestAt));
+  if (waitMs > 0) await sleep(waitMs);
+  lastSecRequestAt = Date.now();
+}
 
 function secHeaders(): HeadersInit {
   const userAgent = process.env.SEC_USER_AGENT?.trim();
@@ -24,27 +51,61 @@ function secHeaders(): HeadersInit {
     'User-Agent': userAgent,
     Accept: 'application/json',
     'Accept-Encoding': 'gzip, deflate',
+    Referer: 'https://caldun.netlify.app/',
   };
 }
 
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  return null;
+}
+
 async function fetchJson<T>(url: string, revalidate: number): Promise<T> {
-  const response = await fetch(url, {
-    headers: secHeaders(),
-    next: { revalidate },
-  });
+  let lastError: SecRequestError | null = null;
 
-  if (!response.ok) {
+  for (let attempt = 0; attempt <= SEC_RETRY_DELAYS_MS.length; attempt += 1) {
+    await paceSecRequest();
+
+    const response = await fetch(url, {
+      headers: secHeaders(),
+      next: { revalidate },
+    });
+
+    if (response.ok) {
+      return response.json() as Promise<T>;
+    }
+
     const body = await response.text().catch(() => '');
-    const suffix = body.includes('Request Rate Threshold Exceeded')
-      ? ' — SEC rate limit reached; try again shortly.'
-      : response.status === 403
-        ? ' — SEC blocked the automated request.'
-        : '';
+    const rateLimited =
+      response.status === 429 ||
+      response.status === 403 ||
+      body.includes('Request Rate Threshold Exceeded') ||
+      body.includes('Undeclared Automated Tool');
+    const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
 
-    throw new Error(`SEC request failed (${response.status})${suffix}`);
+    const suffix = rateLimited
+      ? ' — SEC temporarily limited this server request.'
+      : '';
+
+    lastError = new SecRequestError(
+      `SEC request failed (${response.status})${suffix}`,
+      response.status,
+      retryAfter,
+    );
+
+    const retryable = rateLimited || response.status >= 500;
+    if (!retryable || attempt === SEC_RETRY_DELAYS_MS.length) {
+      throw lastError;
+    }
+
+    const baseDelay = retryAfter ? retryAfter * 1_000 : SEC_RETRY_DELAYS_MS[attempt];
+    const jitter = Math.floor(Math.random() * 250);
+    await sleep(baseDelay + jitter);
   }
 
-  return response.json() as Promise<T>;
+  throw lastError ?? new SecRequestError('SEC request failed.', 502);
 }
 
 function firstPeriodItem(endDate: string, ...maps: Array<Map<string, SecUnit>>): SecUnit | null {
@@ -65,7 +126,7 @@ export async function GET(request: NextRequest) {
 
     const tickers = await fetchJson<
       Record<string, { cik_str: number; ticker: string; title: string }>
-    >(`${SEC_WEB_BASE}/files/company_tickers.json`, 86_400);
+    >(`${SEC_WEB_BASE}/files/company_tickers.json`, 604_800);
 
     const company = Object.values(tickers).find(
       (item) => item.ticker.toUpperCase() === ticker,
@@ -78,7 +139,7 @@ export async function GET(request: NextRequest) {
     const cik = String(company.cik_str).padStart(10, '0');
     const payload = await fetchJson<CompanyFactsPayload>(
       `${SEC_DATA_BASE}/api/xbrl/companyfacts/CIK${cik}.json`,
-      3_600,
+      21_600,
     );
 
     const gaap = (payload.facts?.['us-gaap'] || {}) as Record<string, CompanyFact>;
@@ -240,11 +301,25 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+          'Cache-Control': 'public, max-age=300, s-maxage=21600, stale-while-revalidate=86400',
         },
       },
     );
   } catch (error) {
+    if (error instanceof SecRequestError && (error.status === 403 || error.status === 429)) {
+      const retryAfter = error.retryAfterSeconds ?? 60;
+      return NextResponse.json(
+        {
+          error:
+            'SEC is temporarily limiting requests from Caldun’s hosting network. Caldun will retry automatically; please try this ticker again shortly.',
+        },
+        {
+          status: 503,
+          headers: { 'Retry-After': String(retryAfter) },
+        },
+      );
+    }
+
     const message = error instanceof Error ? error.message : 'Unable to load company data.';
     return NextResponse.json({ error: message }, { status: 500 });
   }
