@@ -7,9 +7,10 @@ on:
   pull_request:
     branches:
       - phase-0-correctness
+      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -18,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.ref }}
 
       - name: Use Node 22
         uses: actions/setup-node@v4
@@ -40,6 +43,20 @@ jobs:
         run: npm run build
         env:
           SEC_USER_AGENT: CALDUN-CI ci@example.invalid
+
+      - name: Commit generated lockfile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/nextjs-typescript-migration'
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain package-lock.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "Add dependency lockfile"
+            git push origin HEAD:nextjs-typescript-migration
+          else
+            echo "package-lock.json is already current."
+          fi
 
       - name: Save generated lockfile
         if: always()
